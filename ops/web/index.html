@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rhodium · Day Trader Monitor</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #0d1117; color: #e6edf3; }
+    body { max-width: 920px; margin: 0 auto; padding: 24px 16px; }
+    header { display: flex; justify-content: space-between; gap: 16px; align-items: center; flex-wrap: wrap; }
+    h1 { font-size: 1.5rem; margin: 0 0 8px; }
+    .sub, time { color: #8b949e; font-size: 0.86rem; }
+    button { border: 1px solid #30363d; border-radius: 8px; background: #21262d; color: #e6edf3; padding: 10px 14px; cursor: pointer; }
+    button:hover { background: #30363d; } button:disabled { opacity: .5; cursor: default; }
+    #feed { margin-top: 28px; display: flex; flex-direction: column; gap: 14px; }
+    article { border: 1px solid #30363d; border-radius: 12px; background: #161b22; padding: 16px; }
+    article.analysis_final, article.analysis_start { border-color: #325b7e; }
+    article.error { border-color: #9e4545; }
+    article .body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; margin-top: 8px; }
+    article .type { text-transform: uppercase; letter-spacing: .08em; font-size: .7rem; color: #8b949e; }
+    .buttons { display: flex; gap: 8px; }
+    .tag { display: inline-block; padding: 4px 10px; border: 1px solid #30363d; border-radius: 20px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div><h1>Rhodium · Day Trader</h1><div class="sub">Claude · Yahoo Finance · Beobachtungsmodus · keine Orders</div></div>
+    <div class="buttons"><button id="daily">Daily scan</button><button id="orb">ORB scan</button><button id="notify">Benachrichtigungen</button></div>
+  </header>
+  <p class="sub"><span class="tag" id="connection">Verbinde …</span> · Automatische Scans: 09:00 und 10:00–15:00 New Yorker Zeit, werktags</p>
+  <main id="feed" aria-live="polite"></main>
+  <script>
+    const feed = document.getElementById('feed');
+    const status = document.getElementById('connection');
+    let draft = null;
+    const maxCards = 100;
+    function addCard(item) {
+      const card = document.createElement('article');
+      card.className = item.type;
+      const header = document.createElement('div');
+      header.className = 'type';
+      const date = new Date(item.at);
+      header.textContent = `${item.type.replace('_', ' ')} · ${date.toLocaleString('de-DE')}`;
+      const body = document.createElement('div');
+      body.className = 'body';
+      body.textContent = item.message;
+      card.append(header, body);
+      feed.prepend(card);
+      while (feed.children.length > maxCards) feed.lastElementChild.remove();
+      return { card, body };
+    }
+    const eventStream = new EventSource('/api/events');
+    eventStream.onopen = () => { status.textContent = '● Live'; };
+    eventStream.onerror = () => { status.textContent = '○ Verbindung unterbrochen – neuer Versuch …'; };
+    eventStream.onmessage = event => {
+      const msg = JSON.parse(event.data);
+      if (msg.type === 'analysis_start') draft = addCard(msg);
+      else if (msg.type === 'analysis_chunk') {
+        if (draft) draft.body.textContent += msg.message;
+      } else if (msg.type === 'analysis_final') {
+        if (draft) { draft.body.textContent = msg.message; draft.card.className = msg.type; draft = null; }
+        else addCard(msg);
+        if (document.visibilityState === 'hidden' && 'Notification' in window && Notification.permission === 'granted') {
+          new Notification('Rhodium: Claude-Analyse', { body: msg.message.slice(0, 160) });
+        }
+      } else addCard(msg);
+    };
+    async function run(mode) {
+      try {
+        const result = await fetch(`/api/run?mode=${encodeURIComponent(mode)}`, { method: 'POST' });
+        if (!result.ok) throw new Error((await result.json()).detail || `HTTP ${result.status}`);
+      } catch (error) { addCard({ type: 'error', at: new Date().toISOString(), message: String(error) }); }
+    }
+    document.getElementById('daily').onclick = () => run('daily');
+    document.getElementById('orb').onclick = () => run('orb');
+    document.getElementById('notify').onclick = () => {
+      if ('Notification' in window) Notification.requestPermission();
+    };
+  </script>
+</body>
+</html>
