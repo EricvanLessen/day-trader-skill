@@ -8,6 +8,79 @@ A small, **one-container** extension to the upstream `day-trader-skill` fork. Al
 - One FastAPI worker with SSE live feed and two manual scan buttons. Optional browser notifications work while the page is open; no true Web Push in a closed browser. No React or database.
 - SSE history and scanner files are ephemeral (lost on pod restart). No persistent trade records.
 
+## Rhodium quickstart: directly to GKE
+
+**This is the only path you need for the Rhodium service.** Do **not** follow the upstream Claude plugin instructions from the root README, do **not** copy the skills manually, and do **not** install React. The repository already includes the original skills and the `Dockerfile`.
+
+**Prerequisites:** An existing GKE cluster; local `git`, `gcloud`, `kubectl` and `terraform` installed; Google Cloud permissions for Cloud Build, Artifact Registry and Kubernetes; a separately billed Anthropic API key. No GCP credentials or API keys belong in Git.
+
+**1. Clone your fork (run in your local terminal):**
+
+```bash
+git clone https://github.com/EricvanLessen/day-trader-skill.git
+cd day-trader-skill
+git switch main
+git pull --ff-only
+```
+
+**2. Authenticate to your existing GKE cluster:**
+
+```bash
+gcloud auth login
+gcloud auth application-default login
+gcloud config set project YOUR_PROJECT_ID
+gcloud container clusters get-credentials YOUR_CLUSTER_NAME --location YOUR_CLUSTER_LOCATION --project YOUR_PROJECT_ID
+```
+
+**3. Create a local Terraform configuration (this is ignored by Git):**
+
+```bash
+cat > terraform/terraform.tfvars <<'EOF'
+project_id       = "YOUR_PROJECT_ID"
+region           = "europe-west3"
+cluster_name     = "YOUR_CLUSTER_NAME"
+cluster_location = "YOUR_CLUSTER_LOCATION"
+EOF
+```
+
+Adjust `region` to the Artifact Registry region you want and `cluster_location` to the **actual** GKE cluster location (zone or region).
+
+**4. Review and create the resources:**
+
+```bash
+cd terraform
+terraform init
+terraform validate
+terraform plan
+terraform apply
+cd ..
+```
+
+Terraform adds an Artifact Registry repository, a namespace, one Deployment and an **internal-only** Kubernetes Service to your **existing** cluster. **It does not create GKE.** The Pod may initially be unhealthy: the image and Kubernetes Secret do not exist yet. This is expected during the first bootstrap.
+
+**5. Build/push the container, then provide the Anthropic key via a Kubernetes Secret:**
+
+```bash
+gcloud builds submit --tag europe-west3-docker.pkg.dev/YOUR_PROJECT_ID/day-trader/day-trader-monitor:v1 .
+read -rsp 'Anthropic API key: ' ANTHROPIC_API_KEY; echo
+kubectl -n rhodium-trading create secret generic day-trader-anthropic --from-literal=api-key="$ANTHROPIC_API_KEY"
+unset ANTHROPIC_API_KEY
+kubectl -n rhodium-trading rollout restart deployment/day-trader-monitor
+kubectl -n rhodium-trading rollout status deployment/day-trader-monitor
+```
+
+If you chose a different Artifact Registry `region`, substitute that region in the `gcloud builds submit --tag` image URI too. Ensure the image is accessible to your GKE nodes. For an existing Secret, update it instead of running `create` again.
+
+**6. Open the browser feed (keep this terminal open):**
+
+```bash
+kubectl -n rhodium-trading port-forward svc/day-trader-monitor 8080:8080
+```
+
+Open **http://127.0.0.1:8080**. You can manually trigger `Daily scan` or `ORB scan`. Scheduled scans run automatically when enabled. This is an internal monitor: do **not** expose it publicly without authentication.
+
+**Optional, not part of deployment:** Run the local Python tests below if you want a preflight check. No local Python environment is required to deploy the container.
+
 ## Local test
 
 Use Python 3.11+ and an Anthropic **API key**; a Claude chat subscription alone does not cover API usage.
