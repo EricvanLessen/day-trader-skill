@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+.venv/
+.trader-runtime/
+trader/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+terraform/.terraform/
+terraform/*.tfvars
+terraform/*.tfstate*
+terraform/*.tfplan
