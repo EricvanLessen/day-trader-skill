@@ -1,5 +1,8 @@
 # The Day Trader skill
 
+> **Rhodium deployment (our GKE / Claude monitor):** Start with [ops/README.md](ops/README.md#rhodium-quickstart-directly-to-gke). The Claude plugin installation options below are for the **upstream interactive skill pack** and are *not needed* to deploy our Docker image.
+
+
 11 Claude skills for day trading: scan thousands of charts, track breaking news, time every entry and exit, and replay every outcome before you risk a dollar.
 
 Free, MIT, no signup, no API key. The tools are plain Python that read free
