@@ -28,7 +28,10 @@ data "google_container_cluster" "rhodium" {
 provider "kubernetes" {
   host                   = "https://${data.google_container_cluster.rhodium.endpoint}"
   token                  = data.google_client_config.current.access_token
-  cluster_ca_certificate = base64decode(data.google_container_cluster.rhodium.master_auth[0].cluster_ca_certificate)
+  # DNS-based GKE endpoints (*.gke.goog) use a publicly trusted CA.
+  # The cluster CA is only valid for IP-based control-plane endpoints.
+  # Null keeps TLS verification enabled using system roots on DNS endpoints.
+  cluster_ca_certificate = endswith(data.google_container_cluster.rhodium.endpoint, ".gke.goog") ? null : base64decode(data.google_container_cluster.rhodium.master_auth[0].cluster_ca_certificate)
 }
 
 resource "google_artifact_registry_repository" "monitor" {
