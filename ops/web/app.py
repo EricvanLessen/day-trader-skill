@@ -21,9 +21,9 @@ from fastapi.responses import FileResponse, StreamingResponse
 ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = Path(os.getenv("TRADER_DATA_DIR", "/data"))
 ET = ZoneInfo("America/New_York")
-MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-5")
+MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-5-5")
 AUTO_SCAN = os.getenv("AUTO_SCAN", "true").lower() == "true"
-MAX_TOKENS = int(os.getenv("CLAUDE_MAX_TOKENS", "1100"))
+MAX_TOKENS = int(os.getenv("CLAUDE_MAX_TOKENS", "4096"))
 COMMAND_TIMEOUT = int(os.getenv("SCAN_TIMEOUT_SECONDS", "900"))
 MAX_HITS = int(os.getenv("CLAUDE_MAX_HITS", "12"))
 
@@ -159,9 +159,31 @@ async def claude_brief(mode: str, scan: object, news: object) -> None:
             if len(pending) >= 90 or "\n" in pending:
                 feed.publish("analysis_chunk", pending)
                 pending = ""
+        result = await stream.get_final_message()
     if pending:
         feed.publish("analysis_chunk", pending)
-    feed.publish("analysis_final", "".join(output))
+    # Output tokens include Claude's thinking. A short max_tokens budget can
+    # result in a successful HTTP response containing no visible text.
+    usage = getattr(result, "usage", None)
+    metadata = {
+        "model": MODEL,
+        "stop_reason": result.stop_reason,
+        "input_tokens": getattr(usage, "input_tokens", None),
+        "output_tokens": getattr(usage, "output_tokens", None),
+        "content_types": [block.type for block in result.content],
+    }
+    logger.info("Claude response metadata: %s", metadata)
+    full_text = "".join(block.text for block in result.content if block.type == "text")
+    # Prefer the accumulated response, so completion cannot silently lose text.
+    if full_text.strip():
+        feed.publish("analysis_final", full_text, **metadata)
+    else:
+        explanation = (
+            f"Claude hat keinen sichtbaren Text geliefert "
+            f"(stop_reason={result.stop_reason}, output_tokens={metadata['output_tokens']}). "
+            "Bei max_tokens gegebenenfalls CLAUDE_MAX_TOKENS erhöhen."
+        )
+        feed.publish("error", explanation, **metadata)
 
 
 async def run_scan(mode: str) -> None:
